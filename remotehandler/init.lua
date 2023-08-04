@@ -6,7 +6,8 @@ local Jupiter = require(ReplicatedStorage.Packages.Jupiter)
 export type Bridge = {
 	LinkedBridge: any;
 	Connections: {({})->any};
-	Start: {(nil) -> nil};
+	Start: {(nil) -> nil}?;
+	CanFireServer: {({any}) -> boolean}?;
 }
 
 type void = nil
@@ -72,6 +73,13 @@ end
 function remotes:fireServer(bridgeKey: string, ...: any)
 	local Args = {...}
 	local bridge: Bridge = self:getBridgeByKey(bridgeKey)
+	
+	if type(bridge.CanFireServer) == 'function' then
+		if bridge.CanFireServer(unpack(Args)) == false then
+			print(`Cannot fire server`)
+			return
+		end
+	end
 	if bridge ~= nil then
 		bridge.LinkedBridge:Fire(unpack(Args))
 	end
