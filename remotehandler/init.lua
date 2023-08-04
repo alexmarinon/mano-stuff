@@ -1,59 +1,91 @@
+--!nonstrict
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Jupiter = require(ReplicatedStorage.Packages.Jupiter)
-local BridgeNet = require(ReplicatedStorage.Packages.BridgeNet)
+
+export type Bridge = {
+	LinkedBridge: any;
+	Connections: {({})->any};
+	Start: {(nil) -> nil};
+}
+
+type void = nil
+
+local BRIDGE_FOLDER = script.bridges
 
 local remotes = Jupiter.CreateController({
 	Name = 'remotes'
 })
 
-export type Bridge = {
-	Name: string;
-	Bridge: typeof(BridgeNet.CreateBridge(''));
-	Connections: {({}) -> any}
-}
-
 remotes.Bridges = {}
+remotes.BridgeConnections = {}
 
 local function registerBridges()
-	for _, bridge in script.bridges:GetChildren() do
-		if bridge:IsA('ModuleScript') then
-			local bridge: Bridge = require(bridge)
-			remotes.Bridges[bridge.Name] = bridge
-			print(`Registered bridge {bridge.Name}`)
+	for _, bridge in BRIDGE_FOLDER:GetChildren() do
+		if not bridge:IsA('ModuleScript') then
+			continue
 		end
+		local loadedBridge = require(bridge)
+		remotes.Bridges[loadedBridge.Name] = loadedBridge
+		print(`Loaded {loadedBridge.Name}`)
 	end
 end
 
-local function connectAllBridges()
+local function createConnections()
 	for _, bridge: Bridge in remotes.Bridges do
-		bridge.Bridge:Connect(function(...)
-			print(`Request recieved for bridge {bridge.Name}`)
+		local linkedBridge = bridge.LinkedBridge
+		linkedBridge:Connect(function(...)
+			print(`Fired`)
+			local Args = {...}
 			for _, fn in bridge.Connections do
-				fn(...)
+				task.spawn(function()
+					fn(unpack(Args))
+				end)
 			end
 		end)
 	end
 end
 
-function remotes:getBridgeByKey(bridgeKey: string)
-	assert(type(bridgeKey) == 'string', `Bridge key is not a string`)
-	assert(#bridgeKey > 0, `bridgeKey length must be > 0`)
-	assert(self.Bridges[bridgeKey] ~= nil, `Bridge not found!`)
-	return self.Bridges[bridgeKey]
+local function runBridgeStartFuncs()
+	for _, bridge: Bridge in remotes.Bridges do
+		if type(bridge.Start) == 'function' then
+			bridge.Start()
+		end
+	end
 end
 
-function remotes:addConnectionToBridge(bridgeKey: string, fn: ({any}) -> any)
+function remotes:getBridgeByKey(bridgeKey: string): Bridge
+	assert(type(bridgeKey) == 'string', `Bridge key must be string got {typeof(bridgeKey)}`)
+	assert(#bridgeKey > 0, `Cannot get bridge by empty bridgeKey string`)
+	assert(self.Bridges[bridgeKey] ~= nil, `Bridge does not exist`)
+	return self.Bridges[bridgeKey]	
+end
+
+function remotes:connect(bridgeKey: string, fn: ({any}) -> nil): void
 	local bridge: Bridge = self:getBridgeByKey(bridgeKey)
-	table.insert(bridge.Connections, fn)
+	if bridge ~= nil then
+		table.insert(bridge.Connections, fn)
+	end
+	return nil
 end
 
-function remotes:__init__()
+function remotes:fireServer(bridgeKey: string, ...: any)
+	local Args = {...}
+	local bridge: Bridge = self:getBridgeByKey(bridgeKey)
+	if bridge ~= nil then
+		bridge.LinkedBridge:Fire(unpack(Args))
+	end
+end
+
+function remotes:__init__(): void
 	registerBridges()
+	return nil
 end
 
-function remotes:__start__()
-	connectAllBridges()
+function remotes:__start__(): void
+	runBridgeStartFuncs()
+	createConnections()
+	return nil
 end
 
 return remotes
